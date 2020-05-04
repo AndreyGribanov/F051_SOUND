@@ -10,7 +10,7 @@
 #include "spi25.h"//процедуры дл€ работы с flash
 #include "WavHead.h"
 
-#define reset_CS GPIOA->BSRR |= GPIO_BSRR_BR_15;//выбор кристалла не активен(лог 1)
+#define reset_CS GPIOB->BSRR |= GPIO_BSRR_BS_6;//выбор кристалла неактивен(лог 1)
 
 #define F_CLK 48000000// частота тактировани€ TIM6
 
@@ -35,13 +35,15 @@ RCC->CFGR &=~ RCC_CFGR_PPRE;	//000: HCLK clock divided by 1 for APB
 RCC->CFGR &=~ RCC_CFGR_HPRE;	//SYSCLK DIV BY 1 FOR HCLK
 RCC->CFGR &=~ RCC_CFGR_PLLXTPRE;	//ќ“ Ћё„ј≈ћ ѕ–≈ƒƒ≈Ћ»“≈Ћ№ PLL
 
-
+//RCC->CFGR= (0b111<<28);	//делитель дл€ ћ—ќ =128,недоступен в 051
+//RCC->CFGR |= RCC_CFGR_MCO_2;// System clock
 	
+//system clock на мсо равен 48ћ√ц!!!!!расчетное	
  //Config PLL только дл€ F051:
 // RCC->PLLCFGR=(MCOPRE<<28) | (MCO<<24) | (PLLMUL<<18) | PLLXTPRE |(PLLSRC<<15)|( PPRE<<8)|(HPRE<<4)|SW; //page 162	
 //	MCOPRE-предделитель выхода MCO,MCO-какой сигнал выводить,PLLXTPRE-будет ли включен предделитель PLL(значение в RCC_CFGR2)
 //PLLSRC-откуда тактируем PLL,PPRE-делитель дл€ APB,HPRE-делитель дл€ AHB,SW источник тактировани€
-RCC->CFGR= (4<<18) | (0b10<<15)| RCC_CFGR_SW_PLL; //   настраеваетс€ при сброшеном бите 	PLLON  в CR		
+RCC->CFGR= (0b111<<28)|(4<<18) | (0b10<<15)| RCC_CFGR_SW_PLL|RCC_CFGR_MCO_2; //   настраеваетс€ при сброшеном бите 	PLLON  в CR		
 RCC->CR |=    RCC_CR_PLLON;//да
 while (!(RCC->CR & RCC_CR_PLLRDY)){}; //wait for PLL ready 	
 
@@ -59,9 +61,9 @@ DAC->CR   |= (DAC_CR_TEN1                  //обновление содержимого регистра пре
              |DAC_CR_DMAEN1                 //разрешить прием данных канала є1 от ƒћј
              |DAC_CR_EN1); 
 
-RCC->APB1ENR        |=  RCC_APB1ENR_TIM6EN;    //подаем тактирование TIM6,на APB1 таймеры работают с удвоенной частотой APB1 те 84ћ√ц
+RCC->APB1ENR        |=  RCC_APB1ENR_TIM6EN;    //подаем тактирование TIM6
 TIM6->PSC            =  0;                     //«адаем частоту дискретизации 
-TIM6->ARR            =  F_CLK/(SampleRate*Ncanal); //65536max                  //(при тактовой 84000000)
+TIM6->ARR            =  F_CLK/(SampleRate*Ncanal); //65536max                  
 TIM6->CR2         |=  TIM_CR2_MMS_1;//MMS = 010 : update event is selected as a trigger output (TRGO)
 }//end init_DAC_TIM6
 //*******************************************************************************************************************
@@ -83,11 +85,32 @@ DMA1_Channel3->CCR |=  DMA_CCR_MINC;         //адрес пам€ти инкрементируем
 DMA1_Channel3->CCR &= ~DMA_CCR_PSIZE;        //размерность данных периферии - 8 бит.
 DMA1_Channel3->CCR &= ~DMA_CCR_MSIZE;        //размерность данных пам€ти    - 8 бит
 DMA1_Channel3->CCR |=  DMA_CCR_CIRC;         //включить циклический режим передачи данных
- DMA1_Channel3->CCR|=  DMA_CCR_PL_1;         //приоритет очень высокий
+ DMA1_Channel3->CCR |=  DMA_CCR_PL_1;         //приоритет очень высокий
 
 DMA1_Channel3->CCR  |=  DMA_CCR_DIR; 	       //1-направление передачи - из пам€ти в периферию
 
 }//end init_DMA
+
+void init_MCO(void)//инициализаци€ выхода Microcontroller clock output 
+{//у 051 это PA8(pin 18)
+   RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+
+   GPIOA->MODER &=~ GPIO_MODER_MODER8;//сброс
+	 GPIOA->MODER |= GPIO_MODER_MODER8_1;//01-output,00-input(after reset),10-AF,11-analog.
+	 GPIOA->AFR[1]  &=~ GPIO_AFRH_AFSEL8 ;//сброс,AF0 MCO
+	 GPIOA->OSPEEDR |=(GPIO_OSPEEDER_OSPEEDR8_1|
+	                  GPIO_OSPEEDER_OSPEEDR8_0);//10-высока€ скорость 10ћ√ц,01-2ћ√ц,11-50ћгц
+
+
+}
+void no_noise()
+{
+RCC->AHBENR |= RCC_AHBENR_GPIOAEN;
+GPIOA->MODER |= GPIO_MODER_MODER4_0;//01-output,00-input(after reset),10-AF,11-analog.
+GPIOA->OSPEEDR |= GPIO_OSPEEDER_OSPEEDR4_0;//10-высока€ скорость 10ћ√ц,01-2ћ√ц,11-50ћгц	|
+GPIOA->BSRR |= GPIO_BSRR_BS_4;	                 
+}
+
 
 //**********************************************************************************************************************
 
@@ -95,6 +118,8 @@ int main(void)
 {
 	
 init_RCC();
+//init_MCO();//	
+no_noise();
 spi_conf();	
 
 init_DMA();	
